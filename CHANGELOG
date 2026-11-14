@@ -37,6 +37,9 @@ NOTICE: Create a parliament config file before upgrading (see https://arkime.com
 
 6.9.3 2026/12/xx
 
+## Capture
+  - MQTT parser now records PUBLISH payload length in the mqtt.payloadLen session field (excludes topic, packet identifier and MQTT 5.0 properties), available in SPIView and the session detail view
+
 6.9.2 2026/11/12
 ## Breaking
   - #4415 uploadCommand {CONFIG} is now the -c value as given, with .hiddenconfig or urlinfile:// the dropUser must be able to read that file

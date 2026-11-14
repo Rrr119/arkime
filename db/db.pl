@@ -5974,6 +5974,12 @@ sub sessions3Update
         "qosCnt" : {
           "type" : "long"
         },
+        "payloadLen" : {
+          "type" : "long"
+        },
+        "payloadLenCnt" : {
+          "type" : "long"
+        },
         "topic" : {
           "type" : "keyword"
         },

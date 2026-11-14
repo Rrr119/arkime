@@ -32,9 +32,14 @@
       "hasPassword"
      ],
      "flagsCnt" : 2,
+     "payloadLen" : [
+      3,
+      4
+     ],
+     "payloadLenCnt" : 2,
      "qos" : [
-      "0",
-      "1"
+      0,
+      1
      ],
      "qosCnt" : 2,
      "topic" : [
@@ -191,9 +196,13 @@
       "hasWill"
      ],
      "flagsCnt" : 2,
+     "payloadLen" : [
+      11
+     ],
+     "payloadLenCnt" : 1,
      "qos" : [
-      "1",
-      "2"
+      1,
+      2
      ],
      "qosCnt" : 2,
      "topic" : [
@@ -485,9 +494,14 @@
       "cleanSession"
      ],
      "flagsCnt" : 1,
+     "payloadLen" : [
+      13,
+      5
+     ],
+     "payloadLenCnt" : 2,
      "qos" : [
-      "0",
-      "1"
+      0,
+      1
      ],
      "qosCnt" : 2,
      "topic" : [
@@ -638,6 +652,10 @@
       "hasPassword"
      ],
      "flagsCnt" : 2,
+     "payloadLen" : [
+      21
+     ],
+     "payloadLenCnt" : 1,
      "qos" : [
       1
      ],
@@ -932,6 +950,10 @@
       "cleanSession"
      ],
      "flagsCnt" : 1,
+     "payloadLen" : [
+      0
+     ],
+     "payloadLenCnt" : 1,
      "qos" : [
       0
      ],

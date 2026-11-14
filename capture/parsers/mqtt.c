@@ -21,6 +21,7 @@ LOCAL int willTopicField;
 LOCAL int qosField;
 LOCAL int flagsField;
 LOCAL int connackCodeField;
+LOCAL int payloadLenField;
 
 // MQTT packet types
 LOCAL const char *mqttTypes[] = {
@@ -196,9 +197,10 @@ LOCAL void mqtt_parse_connect(ArkimeSession_t *session, ArkimeParserBuf_t *mqtt,
 /******************************************************************************/
 // Returns total bytes to skip (header + payload) on success,
 // -1 if need more data, -2 if malformed/oversized
-LOCAL int mqtt_parse_publish(ArkimeSession_t *session, const ArkimeParserBuf_t *mqtt, int which, BSB *bsb, int flags, uint32_t remainingLen)
+LOCAL int mqtt_parse_publish(ArkimeSession_t *session, const ArkimeParserBuf_t *mqtt, int which, BSB *bsb, int flags, uint32_t remainingLen, int version)
 {
     int qos = (flags >> 1) & 0x03;
+    uint8_t *varHeaderStart = BSB_WORK_PTR(*bsb);
 
     // Need at least 2 bytes for topic length
     if (BSB_REMAINING(*bsb) < 2)
@@ -208,13 +210,34 @@ LOCAL int mqtt_parse_publish(ArkimeSession_t *session, const ArkimeParserBuf_t *
     int topicLen = (mqtt->buf[which][BSB_WORK_PTR(*bsb) - mqtt->buf[which]] << 8) |
                    mqtt->buf[which][BSB_WORK_PTR(*bsb) - mqtt->buf[which] + 1];
 
-    // Calculate how much of the header we need: 2 (topic len) + topicLen + (qos > 0 ? 2 : 0)
+    // Variable header starts with the topic (2 byte length + topic) and an
+    // optional 2 byte packet identifier for QoS > 0. MQTT 5.0 appends a
+    // property length (varint) plus the properties themselves.
     int headerNeeded = 2 + topicLen + (qos > 0 ? 2 : 0);
     if (headerNeeded > (int)remainingLen)
         return -2; // Malformed
 
-    // If header itself can never fit in the parser buffer, it's too large
-    // to parse (topics may legally be up to 64KB), not malformed
+    // The variable header must fit in the parser buffer to be parsed; the
+    // payload itself may be skipped even when it is larger than the buffer.
+    // Topics may legally be up to 64KB.
+    if (version == 5) {
+        // Need at least one more byte for the property length varint.
+        if ((uint32_t)BSB_REMAINING(*bsb) < (uint32_t)headerNeeded + 1)
+            return -1; // Need more data
+        BSB propBsb = *bsb;
+        BSB_IMPORT_skip(propBsb, headerNeeded);
+        uint32_t propsLen = 0;
+        if (mqtt_decode_varint(&propBsb, &propsLen) < 0)
+            return -2; // Malformed
+        int propVarintLen = BSB_WORK_PTR(propBsb) - (BSB_WORK_PTR(*bsb) + headerNeeded);
+        headerNeeded += propVarintLen + (int)propsLen;
+    }
+
+    if (headerNeeded > (int)remainingLen)
+        return -2; // Malformed
+
+    // If the variable header can never fit in the parser buffer it is too
+    // large to parse, not malformed.
     if (headerNeeded > (int)mqtt->bufMax)
         return -3;
 
@@ -235,6 +258,22 @@ LOCAL int mqtt_parse_publish(ArkimeSession_t *session, const ArkimeParserBuf_t *
     if (qos > 0) {
         BSB_IMPORT_skip(*bsb, 2); // packet ID only for QoS > 0
     }
+
+    // MQTT 5.0 PUBLISH properties sit between the variable header and the
+    // payload. headerNeeded already accounts for them, so consume the rest.
+    if (version == 5) {
+        int propsConsumed = (2 + topicLen + (qos > 0 ? 2 : 0));
+        BSB_IMPORT_skip(*bsb, headerNeeded - propsConsumed);
+    }
+
+    // Payload length is whatever the remaining length leaves after the
+    // variable header (topic length, topic, optional packet ID and
+    // optional MQTT 5.0 properties). It can legitimately be zero.
+    int varHeaderLen = BSB_WORK_PTR(*bsb) - varHeaderStart;
+    int payloadLen = (int)remainingLen - varHeaderLen;
+    if (payloadLen < 0)
+        return -2; // Malformed
+    arkime_field_int_add(payloadLenField, session, payloadLen);
 
     // Return total bytes consumed from buffer (fixed header already consumed before call)
     // plus remaining payload to skip
@@ -318,7 +357,7 @@ LOCAL int mqtt_parser(ArkimeSession_t *session, void *uw, const uint8_t *data, i
         // Handle PUBLISH specially first - can skip large payloads even when
         // they exceed the parser buffer capacity.
         if (packetType == 3) {
-            int skipLen = mqtt_parse_publish(session, mqtt, which, &bsb, flags, remainingLen);
+            int skipLen = mqtt_parse_publish(session, mqtt, which, &bsb, flags, remainingLen, mqtt->version);
             if (skipLen == -1) {
                 // Need more data. If add() truncated this read the header can
                 // never fit (fixed header + topic exceed bufMax), so unregister
@@ -505,6 +544,12 @@ void arkime_parser_init()
                                            "MQTT CONNACK return/reason code (0=Accepted; non-zero=rejected/error)",
                                            ARKIME_FIELD_TYPE_INT_GHASH, ARKIME_FIELD_FLAG_CNT,
                                            (char *)NULL);
+
+    payloadLenField = arkime_field_define("mqtt", "integer",
+                                          "mqtt.payloadLen", "Payload Length", "mqtt.payloadLen",
+                                          "MQTT PUBLISH payload length in bytes (does not include the topic or packet identifier)",
+                                          ARKIME_FIELD_TYPE_INT_GHASH, ARKIME_FIELD_FLAG_CNT,
+                                          (char *)NULL);
 
     userField = arkime_field_by_db("user");
 
