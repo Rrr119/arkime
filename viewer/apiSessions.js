@@ -223,6 +223,41 @@ class SessionAPIs {
   }
 
   // --------------------------------------------------------------------------
+  static #jsonlListWriter (req, res, what, list, fields) {
+    if (what.includes('data')) {
+      if (list.length > 0 && list[0].fields) {
+        list = list.sort((a, b) => a.fields.lastPacket - b.fields.lastPacket);
+      }
+      for (let j = 0; j < list.length; j++) {
+        const sessionData = list[j].fields;
+        sessionData._id = list[j]._id;
+
+        if (!fields) { continue; }
+
+        const row = {};
+        for (let k = 0; k < fields.length; ++k) {
+          const field = fields[k];
+          let value = sessionData[field];
+          if (field === 'ipProtocol' && value) {
+            value = Pcap.protocol2Name(value);
+          }
+          if (value !== undefined) {
+            row[field] = value;
+          }
+        }
+        row._id = sessionData._id;
+
+        res.write(JSON.stringify(row));
+        res.write('\n');
+      }
+    }
+
+    if (what.includes('end')) {
+      res.end();
+    }
+  }
+
+  // --------------------------------------------------------------------------
   static async #sessionsListAddSegments (req, indices, query, list) {
     req.arkimeSegmentOptions ??= { haveIds: new Set(), processedRo: new Set() };
 
@@ -1796,6 +1831,62 @@ class SessionAPIs {
           return res.type('text/plain').send('Could not build query. Err: ' + err);
         } else {
           SessionAPIs.#csvListWriter(req, res, ['end'], null, reqFields);
+        }
+      });
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  /**
+   * POST/GET - /api/sessions/jsonl OR /sessions.jsonl
+   *
+   * Return all the session data as newline delimited JSON (one JSON object
+   * per line) based on the query parameters. Accepts the same query
+   * parameters (expression, fields, ids, length, segments, ...) as the
+   * /api/sessions/csv endpoint.
+   * @name /sessions/jsonl
+   * @param {string} ids - Comma separated list of sessions to retrieve
+   * @param {SessionsQuery} See_List - This API supports a common set of parameters documented in the SessionsQuery section
+   * @returns {ndjson} jsonl - The newline delimited JSON with the sessions requested
+   * @example
+   *   Returns all the sessions with the source IP of 1.2.3.4
+   *   curl -v 'http://localhost:8005/api/sessions/jsonl?date=-1&expression=ip.src%3D%3D1.2.3.4'
+   */
+  static getSessionsJSONL (req, res) {
+    ArkimeUtil.noCache(req, res, 'application/x-ndjson');
+
+    // default fields to display in jsonl
+    let fields = [
+      'ipProtocol', 'firstPacket', 'lastPacket', 'source.ip', 'source.port', 'source.geo.country_iso_code',
+      'destination.ip', 'destination.port', 'destination.geo.country_iso_code', 'network.bytes', 'totDataBytes', 'network.packets', 'node'
+    ];
+
+    // save requested fields because sessionsListFromQuery returns fields with
+    // "rootId" appended onto the end
+    let reqFields = fields;
+
+    if (req.query.fields) {
+      fields = reqFields = ViewerUtils.queryValueToArray(req.query.fields);
+    }
+
+    if (req.query.ids) {
+      const ids = ViewerUtils.queryValueToArray(req.query.ids);
+      SessionAPIs.sessionsListFromIds(req, ids, fields, (err, list) => {
+        if (err) {
+          console.log('ERROR - getSessionsJSONL', util.inspect(err, false, 50));
+          return res.end(JSON.stringify({ success: false, text: 'Can\'t get sessions from IDs', i18n: 'api.sessions.cantGetSessions' }));
+        }
+        SessionAPIs.#jsonlListWriter(req, res, ['data', 'end'], list, reqFields);
+      });
+    } else {
+      SessionAPIs.#sessionsListFromQueryChunky(req, res, fields, null, (err, chunk) => {
+        SessionAPIs.#jsonlListWriter(req, res, ['data'], chunk, reqFields);
+      }, (err) => {
+        if (err) {
+          console.log('ERROR - Could not build query for JSONL', err);
+          return res.type('text/plain').send('Could not build query. Err: ' + err);
+        } else {
+          SessionAPIs.#jsonlListWriter(req, res, ['end'], null, reqFields);
         }
       });
     }

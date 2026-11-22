@@ -1942,6 +1942,13 @@ app.getpost( // sessions csv endpoint (POST or GET) - uses fillQueryFromBody to
   SessionAPIs.getSessionsCSV
 );
 
+app.getpost( // sessions jsonl endpoint (POST or GET) - uses fillQueryFromBody to
+  // fill the query parameters if the client uses POST to support POST and GET
+  ['/api/sessions[/.]jsonl', /\/sessions.jsonl.*/],
+  [fillQueryFromBody, logAction('sessions.jsonl')],
+  SessionAPIs.getSessionsJSONL
+);
+
 app.getpost( // unique endpoint (POST or GET) - uses fillQueryFromBody to
   // fill the query parameters if the client uses POST to support POST and GET
   ['/api/unique', '/unique.txt'],

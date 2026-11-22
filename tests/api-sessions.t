@@ -1,4 +1,4 @@
-use Test::More tests => 206;
+use Test::More tests => 218;
 use Cwd;
 use IO::Socket::INET;
 use URI::Escape;
@@ -217,6 +217,44 @@ tcp,1386004309468,1386004309478,10.180.156.185,53533,US,10.180.156.249,1080,US,2
     $csvTwo =~ s/\r//g;
     @lines = split(/\n/, $csvTwo);
     is (scalar @lines, 3, "CSV length=2 returns header + 2 rows");
+
+# jsonl (newline delimited json) exporter
+    my @defaultJsonlFields = ('ipProtocol', 'firstPacket', 'lastPacket', 'source.ip', 'source.port',
+        'source.geo.country_iso_code', 'destination.ip', 'destination.port',
+        'destination.geo.country_iso_code', 'network.bytes', 'totDataBytes', 'network.packets', 'node');
+
+# jsonl expression query with default fields
+    my $jsonlResp = getBinary("/sessions.jsonl?date=-1&expression=" . uri_escape("file=$pwd/socks-http-example.pcap"));
+    is ($jsonlResp->header('Content-Type'), 'application/x-ndjson', "JSONL Content-Type is ndjson");
+    my @jsonlLines = grep { $_ ne '' } split(/\n/, $jsonlResp->content);
+    is (scalar @jsonlLines, 3, "JSONL Expression returns one object per session");
+    my $firstLine = eval { decode_json($jsonlLines[0]) };
+    ok (defined $firstLine, "JSONL first line is valid JSON");
+    is_deeply ([ sort keys %$firstLine ], [ sort (@defaultJsonlFields, '_id') ], "JSONL Expression has default fields plus _id");
+    eq_or_diff (
+        { %$firstLine{qw(ipProtocol source.ip source.port destination.ip destination.port network.bytes totDataBytes network.packets node)} },
+        { ipProtocol => 'tcp', 'source.ip' => '10.180.156.185', 'source.port' => 53533,
+          'destination.ip' => '10.180.156.249', 'destination.port' => 1080,
+          'network.bytes' => 2698, totDataBytes => 1754, 'network.packets' => 14, node => 'test' },
+        "JSONL Expression session values"
+    );
+
+# jsonl ids query
+    my $jsonlIds = $ArkimeTest::userAgent->get("http://$ArkimeTest::host:8123/sessions.jsonl?date=-1&ids=" . $idQuery->{data}->[0]->{id})->content;
+    my @idLines = grep { $_ ne '' } split(/\n/, $jsonlIds);
+    is (scalar @idLines, 1, "JSONL Ids returns a single session");
+    my $idLine = eval { decode_json($idLines[0]) };
+    ok (defined $idLine, "JSONL Ids line is valid JSON");
+    is ($idLine->{'source.ip'}, '10.180.156.185', "JSONL Ids session values");
+    ok (defined $idLine->{_id} && $idLine->{_id} ne '', "JSONL Ids includes _id");
+
+# jsonl custom fields and length parameter (visible sessions export)
+    my $jsonlCustom = getBinary("/sessions.jsonl?length=1&fields=firstPacket,lastPacket,source.ip,node,network.packets&date=-1&expression=" . uri_escape("file=$pwd/socks-http-example.pcap"))->content;
+    my @customLines = grep { $_ ne '' } split(/\n/, $jsonlCustom);
+    is (scalar @customLines, 1, "JSONL length=1 returns a single session");
+    my $customLine = eval { decode_json($customLines[0]) };
+    ok (defined $customLine, "JSONL custom fields line is valid JSON");
+    is_deeply ([ sort keys %$customLine ], [ sort ('firstPacket', 'lastPacket', 'source.ip', 'node', 'network.packets', '_id') ], "JSONL respects requested fields");
 
 # pcap should respect length parameter (visible sessions export)
     my $pcapAll = $ArkimeTest::userAgent->get("http://$ArkimeTest::host:8123/api/sessions/pcap/sessions.pcap?date=-1&expression=" . uri_escape("file=$pwd/socks-http-example.pcap"))->content;
